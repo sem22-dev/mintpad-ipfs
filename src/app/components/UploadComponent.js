@@ -35,7 +35,7 @@ export default function UploadComponent() {
     setProgress(0);
   
     const xhr = new XMLHttpRequest();
-    xhr.open("POST", "http://localhost:8000/uploadfiles", true); // Ensure you're hitting the correct endpoint
+    xhr.open("POST", "https://app.mintpad.co/uploadfiles", true); // Ensure you're hitting the correct endpoint
   
     // Handle progress
     xhr.upload.onprogress = (event) => {
