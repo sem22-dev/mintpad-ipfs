@@ -1,4 +1,4 @@
-"use client"
+"use client";
 import { useState } from 'react';
 
 export default function UploadComponent() {
@@ -10,16 +10,27 @@ export default function UploadComponent() {
     event.preventDefault();
     
     const formData = new FormData();
-    const files = event.target.files.files;
+    const files = event.target.files;
 
+    // Check if any files are selected
     if (files.length === 0) {
       setMessage('Please select a folder to upload.');
       return;
     }
 
+    // Filter only mp4 files and append them
+    let mp4FilesSelected = false;
     Array.from(files).forEach(file => {
-      formData.append('files', file, file.webkitRelativePath);
+      if (file.type === 'video/mp4') {
+        formData.append('files', file, file.name);
+        mp4FilesSelected = true;
+      }
     });
+
+    if (!mp4FilesSelected) {
+      setMessage('Please select at least one MP4 file.');
+      return;
+    }
 
     setUploading(true);
     setMessage('');
@@ -49,39 +60,21 @@ export default function UploadComponent() {
 
   return (
     <div>
-      <h1 style={{ textAlign: 'center' }}>Upload Folder</h1>
-      <form id="uploadForm" onSubmit={handleFolderUpload} encType="multipart/form-data" style={{ textAlign: 'center' }}>
-        <input 
-          type="file" 
-          name="files" 
-          multiple 
-          webkitdirectory="true" 
-          directory="true" 
-          style={{ display: 'block', margin: '0 auto', padding: '10px', fontSize: '16px' }} 
-        />
-        <button 
-          type="submit" 
-          disabled={uploading} 
-          style={{
-            display: 'block', 
-            margin: '20px auto', 
-            padding: '12px 24px', 
-            fontSize: '16px', 
-            fontWeight: '600', 
-            color: '#fff', 
-            background: uploading ? '#8c8c8c' : 'linear-gradient(135deg, #4e74e6, #1d56f1)', 
-            border: 'none', 
-            borderRadius: '8px', 
-            cursor: uploading ? 'not-allowed' : 'pointer', 
-            transition: 'all 0.3s ease-in-out', 
-            boxShadow: '0 4px 8px rgba(0, 0, 0, 0.2)',
-          }}
-        >
+      <h1>Upload Folder or MP4 Files</h1>
+      <input
+        type="file"
+        multiple
+        webkitdirectory="true"
+        onChange={handleFolderUpload}
+        accept="video/mp4, .mp4"
+      />
+      <div>
+        <button disabled={uploading}>
           {uploading ? 'Uploading...' : 'Upload'}
         </button>
-      </form>
-      {message && <p style={{ textAlign: 'center', fontSize: '16px', fontWeight: '500', color: '#333' }}>{message}</p>}
-      {logs && <pre style={{ textAlign: 'center', color: '#333' }}>{logs}</pre>}
+      </div>
+      {message && <p>{message}</p>}
+      {logs && <pre>{logs}</pre>}
     </div>
   );
 }
