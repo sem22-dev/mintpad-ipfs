@@ -1,5 +1,7 @@
-import { useState } from "react";
-import UpdateIpfsToContract from "./UpdateIpfsToContract"; // Import the contract interaction component
+import { useState, useCallback } from "react";
+import UpdateIpfsToContract from "./UpdateIpfsToContract";
+
+const CHUNK_SIZE = 40 * 1024 * 1024; // 40MB chunks
 
 export default function UploadComponent() {
   const [uploading, setUploading] = useState(false);
@@ -10,68 +12,128 @@ export default function UploadComponent() {
   const [uploadComplete, setUploadComplete] = useState(false);
   const [ipfsLink, setIpfsLink] = useState("");
   const [fileSize, setFileSize] = useState(0);
-  const [lastRootCid, setLastRootCid] = useState(""); // Last root CID
+  const [lastRootCid, setLastRootCid] = useState("");
+  const [currentChunkIndex, setCurrentChunkIndex] = useState(0);
+  const [totalChunks, setTotalChunks] = useState(0);
+
+  // Function to create chunks from files
+  const createFileChunks = useCallback((files) => {
+    const chunks = [];
+    let currentChunk = new FormData();
+    let currentSize = 0;
+    let chunkIndex = 0;
+    let totalSize = 0;
+
+    Array.from(files).forEach((file) => {
+      totalSize += file.size;
+      
+      if (currentSize + file.size > CHUNK_SIZE) {
+        chunks.push({
+          formData: currentChunk,
+          index: chunkIndex,
+          size: currentSize
+        });
+        currentChunk = new FormData();
+        currentSize = 0;
+        chunkIndex++;
+      }
+      
+      currentChunk.append("files", file, file.webkitRelativePath);
+      currentSize += file.size;
+    });
+
+    if (currentSize > 0) {
+      chunks.push({
+        formData: currentChunk,
+        index: chunkIndex,
+        size: currentSize
+      });
+    }
+
+    return { chunks, totalSize };
+  }, []);
+
+  // Function to upload a single chunk
+  const uploadChunk = useCallback(async (chunk, sessionId, totalChunks) => {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", "http://localhost:8020/uploadfiles", true);
+      
+      // Set chunk-related headers
+      xhr.setRequestHeader("X-Chunk-Index", chunk.index);
+      xhr.setRequestHeader("X-Total-Chunks", totalChunks);
+      xhr.setRequestHeader("X-Session-Id", sessionId);
+
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable) {
+          // Calculate overall progress including previous chunks
+          const chunkProgress = (event.loaded / event.total) * 100;
+          const overallProgress = ((chunk.index * 100) + chunkProgress) / totalChunks;
+          setProgress(Math.round(overallProgress));
+        }
+      };
+
+      xhr.onload = () => {
+        if (xhr.status === 200) {
+          try {
+            const response = JSON.parse(xhr.responseText);
+            resolve(response);
+          } catch (error) {
+            reject(new Error("Invalid server response"));
+          }
+        } else {
+          reject(new Error(xhr.responseText || "Upload failed"));
+        }
+      };
+
+      xhr.onerror = () => reject(new Error("Network error during upload"));
+      xhr.send(chunk.formData);
+    });
+  }, []);
 
   // Handle folder upload
   const handleFolderUpload = async (event) => {
     event.preventDefault();
-  
-    const formData = new FormData();
     const files = event.target.files.files;
-  
+
     if (files.length === 0) {
       setMessage("Please select a folder to upload.");
       return;
     }
-  
-    // Append files to formData
-    Array.from(files).forEach((file) => {
-      formData.append("files", file, file.webkitRelativePath);
-    });
-  
+
     setUploading(true);
     setMessage("");
     setLogs("");
     setProgress(0);
-  
-    const xhr = new XMLHttpRequest();
-    xhr.open("POST", "https://app.mintpad.co/uploadfiles", true); // Ensure you're hitting the correct endpoint
-  
-    // Handle progress
-    xhr.upload.onprogress = (event) => {
-      if (event.lengthComputable) {
-        const percentComplete = Math.round((event.loaded / event.total) * 100);
-        setProgress(percentComplete);
-      }
-    };
-  
-    // Handle successful upload and server response
-    xhr.onload = () => {
-      if (xhr.status === 200) {
-        const result = JSON.parse(xhr.responseText);
-        if (result.lastRootCID) {
+    setCurrentChunkIndex(0);
+
+    try {
+      const { chunks, totalSize } = createFileChunks(files);
+      setTotalChunks(chunks.length);
+      const sessionId = Date.now().toString();
+
+      for (let i = 0; i < chunks.length; i++) {
+        setCurrentChunkIndex(i + 1);
+        const result = await uploadChunk(chunks[i], sessionId, chunks.length);
+        
+        // Handle the final response from the last chunk
+        if (i === chunks.length - 1 && result.lastRootCID) {
           const fullIpfsLink = `https://private-gray-tiger.myfilebase.com/ipfs/${result.lastRootCID}/`;
           setIpfsLink(fullIpfsLink);
-          setLastRootCid(result.lastRootCID); // Last root CID as a string
-          setFileSize(result.fileSize); // Ensure fileSize is updated
-          setUploadComplete(true); // Mark the upload as complete
+          setLastRootCid(result.lastRootCID);
+          setFileSize(totalSize);
+          setUploadComplete(true);
+          setMessage("Upload completed successfully!");
         }
-      } else {
-        setMessage("Upload failed.");
-        setLogs(xhr.responseText); // Set logs from response
       }
+    } catch (error) {
+      setMessage(`Upload failed: ${error.message}`);
+      setLogs(error.toString());
+    } finally {
       setUploading(false);
-    };
-    
-    // Handle error
-    xhr.onerror = () => {
-      setMessage("Error uploading files.");
-      setUploading(false);
-    };
-
-    xhr.send(formData);
+    }
   };
-  
+
   // Handle file selection for upload
   const handleFileSelection = (event) => {
     const files = event.target.files;
@@ -85,15 +147,31 @@ export default function UploadComponent() {
       gif: 0
     };
 
+    let totalSize = 0;
+
     Array.from(files).forEach(file => {
       const fileExtension = file.name.split('.').pop().toLowerCase();
       if (allowedExtensions.includes(fileExtension)) {
         fileCount[fileExtension]++;
+        totalSize += file.size;
+
+        // Check if the file exceeds the max size (1.5 GB)
+        const maxFileSize = 1.5 * 1024 * 1024 * 1024;
+        if (file.size > maxFileSize) {
+          setMessage(`File ${file.name} is too large. Max allowed size is 1.5 GB.`);
+          return;
+        }
       }
     });
 
     const collectionSize = Object.values(fileCount).reduce((acc, count) => acc + count, 0);
     setTotalFiles(collectionSize);
+
+    if (totalSize > 1.5 * 1024 * 1024 * 1024) {
+      setMessage("Total file size exceeds 1.5 GB limit.");
+    } else {
+      setMessage("");
+    }
   };
 
   // Copy the full IPFS URL to the clipboard
@@ -145,7 +223,7 @@ export default function UploadComponent() {
             boxShadow: "0 4px 8px rgba(0, 0, 0, 0.2)",
           }}
         >
-          {uploading ? "Uploading..." : "Upload"}
+          {uploading ? `Uploading (${currentChunkIndex}/${totalChunks})...` : "Upload"}
         </button>
       </form>
 
@@ -159,6 +237,12 @@ export default function UploadComponent() {
             transition: "width 0.5s ease-in-out"
           }}></div>
         </div>
+      )}
+
+      {message && (
+        <p style={{ textAlign: "center", color: message.includes("failed") ? "red" : "green" }}>
+          {message}
+        </p>
       )}
 
       {uploadComplete && lastRootCid && (
@@ -192,7 +276,7 @@ export default function UploadComponent() {
 
           <UpdateIpfsToContract
             ipfsLink={ipfsLink}
-            fileSize={Math.floor(fileSize / 2)} // Assuming you need this in bytes
+            fileSize={Math.floor(fileSize / 2)}
             collectionSize={totalFiles}
           />
         </>
