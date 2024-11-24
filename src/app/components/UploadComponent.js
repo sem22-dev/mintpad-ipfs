@@ -57,7 +57,7 @@ export default function UploadComponent() {
   const uploadChunk = useCallback(async (chunk, sessionId, totalChunks) => {
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
-      xhr.open("POST", "http://localhost:8020/uploadfiles", true);
+      xhr.open("POST", "https://app.mintpad.co/uploadfiles", true);
       
       // Set chunk-related headers
       xhr.setRequestHeader("X-Chunk-Index", chunk.index);
