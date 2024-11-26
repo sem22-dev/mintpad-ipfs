@@ -1,4 +1,5 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
+import { Copy, CheckCircle, AlertTriangle } from 'lucide-react';
 import UpdateIpfsToContract from "./UpdateIpfsToContract";
 
 const CHUNK_SIZE = 40 * 1024 * 1024; // 40MB chunks
@@ -6,7 +7,7 @@ const CHUNK_SIZE = 40 * 1024 * 1024; // 40MB chunks
 export default function UploadComponent() {
   const [uploading, setUploading] = useState(false);
   const [message, setMessage] = useState("");
-  const [logs, setLogs] = useState("");
+  const [logs, setLogs] = useState([]);
   const [progress, setProgress] = useState(0);
   const [totalFiles, setTotalFiles] = useState(0);
   const [uploadComplete, setUploadComplete] = useState(false);
@@ -15,6 +16,8 @@ export default function UploadComponent() {
   const [lastRootCid, setLastRootCid] = useState("");
   const [currentChunkIndex, setCurrentChunkIndex] = useState(0);
   const [totalChunks, setTotalChunks] = useState(0);
+  const [uploadLogs, setUploadLogs] = useState([]);
+  const [copyStatus, setCopyStatus] = useState('idle'); // 'idle', 'copied', 'error'
 
   // Function to create chunks from files
   const createFileChunks = useCallback((files) => {
@@ -51,6 +54,40 @@ export default function UploadComponent() {
     }
 
     return { chunks, totalSize };
+  }, []);
+
+  // Function to set up SSE for progress tracking
+  const setupProgressTracking = useCallback((sessionId) => {
+    const eventSource = new EventSource(`http://localhost:8020/upload-progress/${sessionId}`);
+
+    eventSource.onmessage = (event) => {
+      try {
+        const progressData = JSON.parse(event.data);
+        
+        // Add log entry
+        setUploadLogs(prevLogs => [
+          ...prevLogs, 
+          { 
+            timestamp: new Date().toLocaleTimeString(), 
+            ...progressData 
+          }
+        ]);
+
+        // Handle specific progress stages
+        if (progressData.stage === 'complete') {
+          eventSource.close();
+        }
+      } catch (error) {
+        console.error('Error parsing progress data:', error);
+      }
+    };
+
+    eventSource.onerror = (error) => {
+      console.error('EventSource failed:', error);
+      eventSource.close();
+    };
+
+    return eventSource;
   }, []);
 
   // Function to upload a single chunk
@@ -101,9 +138,10 @@ export default function UploadComponent() {
       return;
     }
 
+    // Reset all states
     setUploading(true);
     setMessage("");
-    setLogs("");
+    setUploadLogs([]);
     setProgress(0);
     setCurrentChunkIndex(0);
 
@@ -111,6 +149,9 @@ export default function UploadComponent() {
       const { chunks, totalSize } = createFileChunks(files);
       setTotalChunks(chunks.length);
       const sessionId = Date.now().toString();
+
+      // Set up SSE connection for progress tracking
+      const eventSource = setupProgressTracking(sessionId);
 
       for (let i = 0; i < chunks.length; i++) {
         setCurrentChunkIndex(i + 1);
@@ -124,11 +165,21 @@ export default function UploadComponent() {
           setFileSize(totalSize);
           setUploadComplete(true);
           setMessage("Upload completed successfully!");
+
+          // Close event source
+          eventSource.close();
         }
       }
     } catch (error) {
       setMessage(`Upload failed: ${error.message}`);
-      setLogs(error.toString());
+      setUploadLogs(prevLogs => [
+        ...prevLogs, 
+        { 
+          timestamp: new Date().toLocaleTimeString(), 
+          stage: 'error', 
+          message: error.message 
+        }
+      ]);
     } finally {
       setUploading(false);
     }
@@ -177,19 +228,32 @@ export default function UploadComponent() {
   // Copy the full IPFS URL to the clipboard
   const copyFullUrlToClipboard = () => {
     const fullUrl = `https://private-gray-tiger.myfilebase.com/ipfs/${lastRootCid}/`;
+    
     navigator.clipboard.writeText(fullUrl)
-      .then(() => setMessage("Full URL copied to clipboard!"))
-      .catch((err) => setMessage("Failed to copy URL: " + err));
+      .then(() => {
+        setCopyStatus('copied');
+        // Reset copy status after 2 seconds
+        setTimeout(() => setCopyStatus('idle'), 2000);
+      })
+      .catch((err) => {
+        setCopyStatus('error');
+        setMessage("Failed to copy URL: " + err);
+        // Reset copy status after 2 seconds
+        setTimeout(() => setCopyStatus('idle'), 2000);
+      });
   };
 
   return (
-    <div>
-      <h1 style={{ textAlign: "center" }}>Upload Folder</h1>
+    <div className="max-w-3xl mx-auto p-8 bg-gradient-to-br from-gray-900 to-gray-800 text-white rounded-2xl shadow-2xl border border-gray-800">
+      <h1 className="text-3xl font-extrabold text-center mb-8 bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-600">
+        Upload Folder to IPFS
+      </h1>
+      
       <form
         id="uploadForm"
         onSubmit={handleFolderUpload}
         encType="multipart/form-data"
-        style={{ textAlign: "center" }}
+        className="text-center"
       >
         <input
           type="file"
@@ -197,88 +261,129 @@ export default function UploadComponent() {
           multiple
           webkitdirectory="true"
           directory="true"
-          style={{ display: "block", margin: "0 auto", padding: "10px", fontSize: "16px" }}
+          className="block mx-auto mb-6 p-4 bg-gray-800 text-white rounded-xl 
+            file:mr-4 file:py-2.5 file:px-5 file:rounded-full file:border-0 
+            file:text-sm file:bg-blue-600 file:text-white 
+            hover:file:bg-blue-700 transition-all duration-300 
+            focus:outline-none focus:ring-2 focus:ring-blue-500"
           onChange={handleFileSelection}
         />
+        
         {totalFiles > 0 && (
-          <p style={{ fontSize: "16px", color: "white" }}>
-            {totalFiles} image/videos/gif{totalFiles > 1 ? "s" : ""} selected
+          <p className="text-sm mb-6 text-gray-300 flex items-center justify-center gap-2">
+            <AlertTriangle size={16} className="text-yellow-400" />
+            {totalFiles} image/video/gif{totalFiles > 1 ? "s" : ""} selected
           </p>
         )}
+        
         <button
           type="submit"
           disabled={uploading}
-          style={{
-            display: "block",
-            margin: "20px auto",
-            padding: "12px 24px",
-            fontSize: "16px",
-            fontWeight: "600",
-            color: "#fff",
-            background: uploading ? "#8c8c8c" : "linear-gradient(135deg, #4e74e6, #1d56f1)",
-            border: "none",
-            borderRadius: "8px",
-            cursor: uploading ? "not-allowed" : "pointer",
-            transition: "all 0.3s ease-in-out",
-            boxShadow: "0 4px 8px rgba(0, 0, 0, 0.2)",
-          }}
+          className={`mx-auto mb-6 px-8 py-3.5 rounded-xl text-white font-bold 
+            transition-all duration-300 flex items-center gap-2 justify-center
+            ${uploading 
+              ? 'bg-gray-600 cursor-not-allowed' 
+              : 'bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 hover:shadow-xl'
+            }`}
         >
           {uploading ? `Uploading (${currentChunkIndex}/${totalChunks})...` : "Upload"}
         </button>
       </form>
 
       {uploading && (
-        <div style={{ marginTop: "20px", width: "100%", backgroundColor: "#f3f3f3", borderRadius: "8px" }}>
-          <div style={{
-            height: "10px",
-            width: `${progress}%`,
-            backgroundColor: "#4e74e6",
-            borderRadius: "8px",
-            transition: "width 0.5s ease-in-out"
-          }}></div>
+        <div className="w-full bg-gray-800 rounded-full h-3 mb-6 overflow-hidden">
+          <div 
+            className="bg-gradient-to-r from-blue-500 to-purple-600 h-3 rounded-full transition-all duration-500" 
+            style={{ width: `${progress}%` }}
+          ></div>
         </div>
       )}
 
       {message && (
-        <p style={{ textAlign: "center", color: message.includes("failed") ? "red" : "green" }}>
+        <p className={`text-center mb-6 flex items-center justify-center gap-2 ${message.includes("failed") ? "text-red-400" : "text-green-400"}`}>
+          {message.includes("failed") ? <AlertTriangle size={20} /> : <CheckCircle size={20} />}
           {message}
         </p>
+      )}
+
+      {/* Detailed Logs Section */}
+      {uploadLogs.length > 0 && (
+        <div className="mt-6 bg-gray-800 rounded-xl p-5">
+          <h2 className="text-lg font-semibold mb-3">Upload Logs</h2>
+          <div className="max-h-64 overflow-y-auto">
+            {uploadLogs.map((log, index) => (
+              <div 
+                key={index} 
+                className={`text-sm mb-2 p-2.5 rounded-lg ${
+                  log.stage === 'error' 
+                    ? 'bg-red-900/50 text-red-300' 
+                    : log.stage === 'complete'
+                    ? 'bg-green-900/50 text-green-300'
+                    : 'bg-gray-700/50 text-gray-300'
+                }`}
+              >
+                <span className="font-mono text-xs mr-2">{log.timestamp}</span>
+                {log.stage && <span className="font-bold mr-2 uppercase">[{log.stage}]</span>}
+                {log.message && <span>{log.message}</span>}
+                {log.processedChunks && (
+                  <span>
+                    Processed Chunks: {log.processedChunks}/{log.totalChunks} 
+                    ({log.percentage}%)
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
       )}
 
       {uploadComplete && lastRootCid && (
         <>
           {lastRootCid && typeof lastRootCid === 'string' && (
-            <p>
+            <p className="mt-6 text-center text-gray-300 flex items-center justify-center gap-2">
               Latest Root CID:{" "}
-              <a href={`https://private-gray-tiger.myfilebase.com/ipfs/${lastRootCid}`} target="_blank" rel="noopener noreferrer">
+              <a 
+                href={`https://private-gray-tiger.myfilebase.com/ipfs/${lastRootCid}`} 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="text-blue-400 hover:underline hover:text-blue-300 transition-colors"
+              >
                 {lastRootCid}
               </a>
             </p>
           )}
 
-          <button
-            onClick={copyFullUrlToClipboard}
-            style={{
-              padding: "10px 20px",
-              fontSize: "16px",
-              fontWeight: "600",
-              color: "#fff",
-              background: "linear-gradient(135deg, #4e74e6, #1d56f1)",
-              border: "none",
-              borderRadius: "8px",
-              cursor: "pointer",
-              transition: "all 0.3s ease-in-out",
-              boxShadow: "0 4px 8px rgba(0, 0, 0, 0.2)",
-            }}
-          >
-            Copy IPFS Full URL
-          </button>
+          <div className="flex flex-col justify-center mt-6 space-x-4">
+            <button
+              onClick={copyFullUrlToClipboard}
+              className={`px-6 py-3 rounded-xl flex items-center gap-2 transition-all duration-300 
+                ${copyStatus === 'copied' 
+                  ? 'bg-green-600 text-white' 
+                  : copyStatus === 'error' 
+                  ? 'bg-red-600 text-white' 
+                  : 'bg-blue-600 text-white hover:bg-blue-700'}`}
+            >
+              {copyStatus === 'copied' ? (
+                <>
+                  <CheckCircle size={20} /> Copied!
+                </>
+              ) : copyStatus === 'error' ? (
+                <>
+                  <AlertTriangle size={20} /> Copy Failed
+                </>
+              ) : (
+                <>
+                  <Copy size={20} /> Copy IPFS Full URL
+                </>
+              )}
+            </button>
 
-          <UpdateIpfsToContract
-            ipfsLink={ipfsLink}
-            fileSize={Math.floor(fileSize / 2)}
-            collectionSize={totalFiles}
-          />
+            <UpdateIpfsToContract
+              ipfsLink={ipfsLink}
+              fileSize={Math.floor(fileSize / 2)}
+              collectionSize={totalFiles}
+            />
+          </div>
         </>
       )}
     </div>

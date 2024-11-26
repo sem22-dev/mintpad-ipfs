@@ -37,7 +37,7 @@ export default function UploadComponent() {
     setLogs('');
 
     try {
-      const response = await fetch('http://localhost:6000/uploadFiles', {
+      const response = await fetch('http://localhost:8020/uploadfiles', {
         method: 'POST',
         body: formData,
       });

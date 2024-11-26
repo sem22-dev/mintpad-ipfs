@@ -6,20 +6,7 @@ import HoverCard from "./components/HoverCard"; // Import the HoverCard componen
 export default function Home() {
   return (
     <div
-      style={{
-        maxWidth: "1200px",
-        margin: "40px auto",
-        padding: "20px",
-        fontFamily: '"Poppins", Arial, sans-serif',
-        backgroundColor: "#000000", // Black background
-        borderRadius: "20px",
-        boxShadow: "0 8px 30px rgba(0, 0, 0, 0.2)",
-        overflow: "hidden",
-        width: "100%",
-        color: "#ffffff", // White text color
-      }}
     >
-      <Head>
         <title>Mintpad v2 - File Uploader</title>
         <meta name="description" content="Mintpad IPFS and contract updater" />
         <link rel="icon" href="/favicon.ico" />
@@ -27,22 +14,21 @@ export default function Home() {
           href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap"
           rel="stylesheet"
         />
-      </Head>
 
 {/* Logo Section */}
-<div style={{ textAlign: "center", marginBottom: "30px" }}>
-  <a href="https://mintpad.co">
-    <img
-      src="https://mintpad.co/wp-content/uploads/2023/03/Logo-Mintpad-Grey.webp"
-      alt="Mintpad Logo"
-      style={{
-        height: "80px",
-        objectFit: "contain",
-        marginBottom: "20px",
-      }}
-    />
-  </a>
-</div>
+      <div className="mt-8 flex justify-center items-center">
+        <a href="https://mintpad.co">
+          <img
+            src="https://mintpad.co/wp-content/uploads/2023/03/Logo-Mintpad-Grey.webp"
+            alt="Mintpad Logo"
+            style={{
+              height: "25px",
+              objectFit: "contain",
+              marginBottom: "20px",
+            }}
+          />
+        </a>
+      </div>
 
       <main
         style={{
@@ -50,26 +36,22 @@ export default function Home() {
           textAlign: "center",
           width: "100%",
         }}
+        className=""
       >
         <h1
-          style={{
-            fontSize: "38px",
-            fontWeight: "700",
-            marginBottom: "30px",
-            color: "#e0e0e0",
-            textTransform: "uppercase",
-            letterSpacing: "1px",
-          }}
+          className="text-3xl"
         >
           Mintpad v2 Beta File Uploader
         </h1>
 
  
 
-        {/* Upload Folder Section */}
-        <HoverCard title="Upload Folder" description={""}>
+      <div className=" mt-12">
+          {/* Upload Folder Section */}
+          <HoverCard title="" description={""} >
           <UploadComponent /> {/* Add the UploadComponent here */}
         </HoverCard>
+      </div>
       </main>
 
       {/* Footer */}
